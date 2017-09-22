@@ -9,7 +9,6 @@ from shutil import copyfile
 from datetime import datetime
 from collections import Counter
 import torch
-import msgpack
 import pandas as pd
 from drqa.model import DocReaderModel
 from drqa.utils import str2bool
@@ -190,6 +189,7 @@ def lr_decay(optimizer, lr_decay):
     return optimizer
 
 
+import msgpack
 def load_data(opt):
     with open('SQuAD/meta.msgpack', 'rb') as f:
         meta = msgpack.load(f, encoding='utf8')

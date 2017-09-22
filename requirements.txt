@@ -1,2 +1,5 @@
-cupy
+numpy
+pandas
+msgpack-python
+spacy
 pynvrtc
