@@ -7,7 +7,6 @@ import numpy as np
 import pandas as pd
 import collections
 import multiprocessing
-from concurrent.futures import ProcessPoolExecutor
 import logging
 
 
@@ -67,7 +66,7 @@ def flatten_json(file, proc_func):
         data = json.load(f)['data']
     print(len(data), 'n docs')
     print(args.threads, 'processors')
-    with ProcessPoolExecutor(max_workers=args.threads) as executor:
+    with multiprocessing.Pool(args.threads) as executor:
         rows = executor.map(proc_func, data)
     rows = sum(rows, [])
     return rows
