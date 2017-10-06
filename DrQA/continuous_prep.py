@@ -11,26 +11,18 @@ import multiprocessing
 from concurrent.futures import ProcessPoolExecutor
 import logging
 
-parser = argparse.ArgumentParser(
-    description='Preprocessing data files, about 10 minitues to run.'
-)
-parser.add_argument('--wv_file', default='glove/glove.840B.300d.txt',
-                    help='path to word vector file.')
-parser.add_argument('--wv_dim', type=int, default=300,
-                    help='word vector dimension.')
-parser.add_argument('--wv_cased', type=bool, default=True,
-                    help='treat the words as cased or not.')
-parser.add_argument('--sort_all', action='store_true',
-                    help='sort the vocabulary by frequencies of all words. '
-                         'Otherwise consider question words first.')
-parser.add_argument('--sample_size', type=int, default=0,
-                    help='size of sample data (for debugging).')
-parser.add_argument('--threads', type=int, default=multiprocessing.cpu_count(),
-                    help='number of threads for preprocessing.')
-parser.add_argument('--batch_size', type=int, default=64,
-                    help='batch size for multiprocess tokenizing and tagging.')
+class CONFIG:
+    def __init__(self):
+        self.wv_file = 'glove/glove.840B.300d.txt',
+        self.wv_dim = 300
+        self.wv_cased = True
+        self.sort_all = True
+        self.sample_size = 0
+        self.threads = multiprocessing.cpu_count()
+        self.batch_size = 64
 
-args = parser.parse_args()
+
+args = CONFIG()
 trn_file = 'SQuAD/train-v1.1.json'
 dev_file = 'SQuAD/dev-v1.1.json'
 wv_file = args.wv_file
