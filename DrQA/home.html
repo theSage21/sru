@@ -1,0 +1,54 @@
+<html>
+    <head>
+        <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.2.1/jquery.min.js"></script>
+        <link rel="stylesheet" href="/static/css/normalize.css">
+        <link rel="stylesheet" href="/static/css/skeleton.css">
+    </head>
+    <body>
+        <div class='container'>
+            <div>
+                <h1>SQUAD Demo</h1>
+                <b id='request_status'></b>
+            </div>
+                <table>
+                    <b id='request_status'></b>
+                    <thead>
+                        <tr><th>Paragraph</th><th>Question</th><th>Answer</th><th><button id='go'>Get answer</button></th></tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><textarea id='context_holder'></textarea></td>
+                            <td><textarea id='question_holder'></textarea></td>
+                            <td><p id='answer_holder'></p></td>
+                        </tr>
+                    </tbody>
+                </table>
+            <script>
+                //----------------------------------------------------
+                $('#go').on('click', function () {
+                    $("#request_status").text('Request In Flight');
+                    var q = $("#question_holder").val();
+                    var c = $("#context_holder").val();
+                    var data = {"paragraph": c, "question": q};
+                    console.log(data);
+                    var url = "/get_context";
+                    $.ajax({type: 'POST',
+                            url: url,
+                            data: JSON.stringify(data),
+                            complete: function (xhr, state){
+                                $("#request_status").text('');
+                                $("#request_status").text(state);
+                            }, // ----------complete
+                            success: function (retdata){
+                                console.log(retdata);
+                                var ans = retdata['answer'];
+                                $("#answer_holder").text(ans);
+                            },
+                            contentType: "application/json",
+                            dataType: 'json'
+                    });
+                });
+            </script>
+        </div>
+    </body>
+</html>

@@ -153,6 +153,18 @@ def main():
         string = 'Origin, Accept, Content-Type, X-Requested-With, X-CSRF-Token'
         bottle.response.headers['Access-Control-Allow-Headers'] = string
 
+    @app.get('/')
+    def demo_home():
+        with open('home.html', 'r') as fl:
+            html = fl.read()
+        return html
+
+    @app.get('/static/<filename:path>')
+    def server_static(filename):
+        root = os.path.join(os.getcwd(), 'static')
+        print(root, 'is static root')
+        return bottle.static_file(filename, root=root)
+
     @app.post('/get-context')
     def get_context():
         paragraph = bottle.request.json['paragraph']
