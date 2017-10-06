@@ -1,3 +1,4 @@
+from continuous_prep import live_preprocess
 import re
 import os
 import sys
@@ -11,7 +12,6 @@ import torch
 import msgpack
 import pandas as pd
 from drqa.model import DocReaderModel
-from continuous_prep import live_preprocess
 from drqa.utils import str2bool
 
 parser = argparse.ArgumentParser(
