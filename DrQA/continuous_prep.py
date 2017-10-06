@@ -312,3 +312,54 @@ if args.sample_size:
     with open('SQuAD/sample.msgpack', 'wb') as f:
         msgpack.dump(sample, f)
 log.info('saved to disk.')
+
+
+def live_preprocess(context, question):
+    "Produce live dictionary for running the code"
+    questions = [question]
+    contexts = [context]
+
+    context_text = [pre_proc(c) for c in contexts]
+    question_text = [pre_proc(q) for q in questions]
+
+    question_docs = [nlp(doc) for doc in question_text]
+    context_docs = [nlp(doc) for doc in context_text]
+    question_tokens = [[normalize_text(w.text) for w in doc]
+                       for doc in question_docs]
+    context_tokens = [[normalize_text(w.text) for w in doc]
+                      for doc in context_docs]
+    context_token_span = [[(w.idx, w.idx + len(w.text)) for w in doc]
+                          for doc in context_docs]
+    context_tags = [[w.tag_ for w in doc] for doc in context_docs]
+    context_ents = [[w.ent_type_ for w in doc] for doc in context_docs]
+    context_features = []
+    for question, context in zip(question_docs, context_docs):
+        question_word = {w.text for w in question}
+        question_lower = {w.text.lower() for w in question}
+        question_lemma = {w.lemma_ if w.lemma_ != '-PRON-' else w.text.lower()
+                          for w in question}
+        match_origin = [w.text in question_word for w in context]
+        match_lower = [w.text.lower() in question_lower for w in context]
+        match_lemma = [((w.lemma_ if w.lemma_ != '-PRON-' else w.text.lower())
+                        in question_lemma) for w in context]
+        context_features.append(list(zip(match_origin, match_lower,
+                                         match_lemma)))
+
+    question_tokens = [[normalize_text(w.text) for w in doc]
+                       for doc in question_docs]
+    context_tokens = [[normalize_text(w.text) for w in doc]
+                      for doc in context_docs]
+    question_ids = token2id(question_tokens, vocab, unk_id=1)
+    context_ids = token2id(context_tokens, vocab, unk_id=1)
+    context_tag_ids = token2id(context_tags, vocab_tag)
+    context_ent_ids = token2id(context_ents, vocab_ent)
+    dev = {
+            'dev_question_ids': question_ids[len(train):],
+            'dev_context_ids': context_ids[len(train):],
+            'dev_context_features': context_features[len(train):],
+            'dev_context_tags': context_tag_ids[len(train):],
+            'dev_context_ents': context_ent_ids[len(train):],
+            'dev_context_text': context_text[len(train):],
+            'dev_context_spans': context_token_span[len(train):]
+            }
+    return dev

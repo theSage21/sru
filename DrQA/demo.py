@@ -1,17 +1,17 @@
 import re
 import os
 import sys
+import bottle
 import random
 import string
 import logging
 import argparse
-from shutil import copyfile
-from datetime import datetime
 from collections import Counter
 import torch
 import msgpack
 import pandas as pd
 from drqa.model import DocReaderModel
+from continuous_prep import live_preprocess
 from drqa.utils import str2bool
 
 parser = argparse.ArgumentParser(
@@ -33,12 +33,12 @@ parser.add_argument('--eval_per_epoch', type=int, default=1,
 parser.add_argument('--seed', type=int, default=937,
                     help='random seed for data shuffling, dropout, etc.')
 parser.add_argument("--cuda", type=str2bool, nargs='?',
-                    const=True, default=torch.cuda.is_available(),
+                    const=True, default=False,
                     help='whether to use GPU acceleration.')
 # training
-parser.add_argument('-e', '--epochs', type=int, default=0)
+parser.add_argument('-e', '--epochs', type=int, default=50)
 parser.add_argument('-bs', '--batch_size', type=int, default=32)
-parser.add_argument('-rs', '--resume', default='checkpoint_epoch50.pt',
+parser.add_argument('-rs', '--resume', default='',
                     help='previous model file name (in `model_dir`). '
                          'e.g. "checkpoint_epoch_11.pt"')
 parser.add_argument('-ro', '--resume_options', action='store_true',
@@ -129,58 +129,44 @@ def main():
             opt = checkpoint['config']
         state_dict = checkpoint['state_dict']
         model = DocReaderModel(opt, embedding, state_dict)
-        epoch_0 = checkpoint['epoch'] + 1
         for i in range(checkpoint['epoch']):
             random.shuffle(list(range(len(train))))  # synchronize random seed
         if args.reduce_lr:
             lr_decay(model.optimizer, lr_decay=args.reduce_lr)
     else:
-        model = DocReaderModel(opt, embedding)
-        epoch_0 = 1
+        raise Exception('Demo without resuming from a saved model')
 
     if args.cuda:
         model.cuda()
 
-    if args.resume:
-        batches = BatchGen(dev, batch_size=args.batch_size, evaluation=True, gpu=args.cuda)
+    app = bottle.Bottle()
+
+    @app.route('/<:re:.*>', method=['OPTIONS'])
+    def enableCORSGenericOptionsRoute():
+        "This allows for CORS usage"
+        return 'OK'
+
+    @app.hook('after_request')
+    def add_cors_headers():
+        bottle.response.headers['Access-Control-Allow-Origin'] = '*'
+        bottle.response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+        string = 'Origin, Accept, Content-Type, X-Requested-With, X-CSRF-Token'
+        bottle.response.headers['Access-Control-Allow-Headers'] = string
+
+    @app.post('/get-context')
+    def get_context():
+        paragraph = bottle.request.json['paragraph']
+        question = bottle.request.json['question']
+        dev = live_preprocess(paragraph, question)
+        batches = BatchGen(dev, batch_size=args.batch_size,
+                           evaluation=True, gpu=args.cuda)
         predictions = []
         for batch in batches:
             predictions.extend(model.predict(batch))
-        em, f1 = score(predictions, dev_y)
-        log.info("[dev EM: {} F1: {}]".format(em, f1))
-        best_val_score = f1
-    else:
-        best_val_score = 0.0
+        print(predictions)
+        return {'result': predictions}
 
-    for epoch in range(epoch_0, epoch_0 + args.epochs):
-        log.warn('Epoch {}'.format(epoch))
-        # train
-        batches = BatchGen(train, batch_size=args.batch_size, gpu=args.cuda)
-        start = datetime.now()
-        for i, batch in enumerate(batches):
-            model.update(batch)
-            if i % args.log_per_updates == 0:
-                log.info('updates[{0:6}] train loss[{1:.5f}] remaining[{2}]'.format(
-                    model.updates, model.train_loss.avg,
-                    str((datetime.now() - start) / (i + 1) * (len(batches) - i - 1)).split('.')[0]))
-        # eval
-        if epoch % args.eval_per_epoch == 0:
-            batches = BatchGen(dev, batch_size=1, evaluation=True, gpu=args.cuda)
-            predictions = []
-            for batch in batches:
-                predictions.extend(model.predict(batch))
-            em, f1 = score(predictions, dev_y)
-            log.warn("dev EM: {} F1: {}".format(em, f1))
-        # save
-        if not args.save_last_only or epoch == epoch_0 + args.epochs - 1:
-            model_file = os.path.join(model_dir, 'checkpoint_epoch_{}.pt'.format(epoch))
-            model.save(model_file, epoch)
-            if f1 > best_val_score:
-                best_val_score = f1
-                copyfile(
-                    model_file,
-                    os.path.join(model_dir, 'best_model.pt'))
-                log.info('[new best model saved.]')
+    app.run(debug=True)
 
 
 def lr_decay(optimizer, lr_decay):
@@ -361,6 +347,7 @@ def score(pred, truth):
     em = 100. * em / total
     f1 = 100. * f1 / total
     return em, f1
+
 
 if __name__ == '__main__':
     main()
