@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 import collections
 import multiprocessing
+from tqdm import tqdm
 import logging
 
 
@@ -67,8 +68,10 @@ def flatten_json(file, proc_func):
     print(len(data), 'n docs')
     print(args.threads, 'processors')
     with multiprocessing.Pool(args.threads) as executor:
-        rows = executor.map(proc_func, data)
-    rows = sum(rows, [])
+        work = executor.imap_unordered(proc_func, data)
+        rows = []
+        for  d in tqdm(work, total=len(data)):
+            rows.extend(d)
     return rows
 
 
