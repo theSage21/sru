@@ -5,11 +5,11 @@ import msgpack
 import unicodedata
 import numpy as np
 import pandas as pd
-import argparse
 import collections
 import multiprocessing
 from concurrent.futures import ProcessPoolExecutor
 import logging
+
 
 class CONFIG:
     def __init__(self):
@@ -74,6 +74,7 @@ def flatten_json(file, proc_func):
 def proc_train(article):
     '''Flatten each article in training data.'''
     rows = []
+    print(len(article['paragraphs']), 'n paragraphs')
     for paragraph in article['paragraphs']:
         context = paragraph['context']
         for qa in paragraph['qas']:
@@ -95,7 +96,9 @@ def proc_dev(article):
             answers = [a['text'] for a in answers]
             rows.append((id_, context, question, answers))
     return rows
+logging.info('FLATTENING JSON for train and dev')
 train = flatten_json(trn_file, proc_train)
+logging.info('done')
 train = pd.DataFrame(train,
                      columns=['id', 'context', 'question', 'answer',
                               'answer_start', 'answer_end'])
