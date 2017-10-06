@@ -75,6 +75,7 @@ def flatten_json(file, proc_func):
 
 def proc_train(article):
     '''Flatten each article in training data.'''
+    print(len(article['paragraphs']), 'in worker')
     rows = []
     for paragraph in article['paragraphs']:
         context = paragraph['context']
