@@ -65,8 +65,6 @@ def flatten_json(file, proc_func):
     '''A multi-processing wrapper for loading SQuAD data file.'''
     with open(file) as f:
         data = json.load(f)['data']
-    print(len(data), 'n docs')
-    print(args.threads, 'processors')
     rows = []
     for  d in tqdm(data):
         rows.extend(proc_func(d))
@@ -75,7 +73,6 @@ def flatten_json(file, proc_func):
 
 def proc_train(article):
     '''Flatten each article in training data.'''
-    print(len(article['paragraphs']), 'in worker')
     rows = []
     for paragraph in article['paragraphs']:
         context = paragraph['context']
