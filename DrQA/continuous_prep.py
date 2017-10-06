@@ -67,11 +67,9 @@ def flatten_json(file, proc_func):
         data = json.load(f)['data']
     print(len(data), 'n docs')
     print(args.threads, 'processors')
-    with multiprocessing.Pool(args.threads) as executor:
-        work = executor.imap_unordered(proc_func, data)
-        rows = []
-        for  d in tqdm(work, total=len(data)):
-            rows.extend(d)
+    rows = []
+    for  d in tqdm(data):
+        rows.extend(proc_func(d))
     return rows
 
 
