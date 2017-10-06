@@ -13,7 +13,7 @@ import logging
 
 class CONFIG:
     def __init__(self):
-        self.wv_file = 'glove/glove.840B.300d.txt',
+        self.wv_file = 'glove/glove.840B.300d.txt'
         self.wv_dim = 300
         self.wv_cased = True
         self.sort_all = True
