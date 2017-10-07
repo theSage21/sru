@@ -1,6 +1,8 @@
+import os
 import re
 import gc
 import json
+import pickle
 import spacy
 import msgpack
 import unicodedata
@@ -96,251 +98,265 @@ def proc_dev(article):
             answers = [a['text'] for a in answers]
             rows.append((id_, context, question, answers))
     return rows
-log.info('FLATTENING JSON for train and dev')
-train = flatten_json(trn_file, proc_train)
-log.info('done')
-train = pd.DataFrame(train,
-                     columns=['id', 'context', 'question', 'answer',
-                              'answer_start', 'answer_end'])
-dev = flatten_json(dev_file, proc_dev)
-dev = pd.DataFrame(dev,
-                   columns=['id', 'context', 'question', 'answers'])
-log.info('json data flattened.')
-
-nlp = spacy.load('en', parser=False, tagger=False, entity=False)
 
 
-def pre_proc(text):
-    '''normalize spaces in a string.'''
-    text = re.sub('\s+', ' ', text)
-    return text
-context_iter = (pre_proc(c) for c in train.context)
-context_tokens = [[w.text for w in doc] for doc in nlp.pipe(
-    context_iter, batch_size=args.batch_size, n_threads=args.threads)]
-log.info('got intial tokens.')
+if not os.path.exists('preprocess_cache'):
+    log.info('FLATTENING JSON for train and dev')
+    train = flatten_json(trn_file, proc_train)
+    log.info('done')
+    train = pd.DataFrame(train,
+                         columns=['id', 'context', 'question', 'answer',
+                                  'answer_start', 'answer_end'])
+    dev = flatten_json(dev_file, proc_dev)
+    dev = pd.DataFrame(dev,
+                       columns=['id', 'context', 'question', 'answers'])
+    log.info('json data flattened.')
+
+    nlp = spacy.load('en', parser=False, tagger=False, entity=False)
 
 
-def get_answer_index(context, context_token, answer_start, answer_end):
-    '''
-    Get exact indices of the answer in the tokens of the passage,
-    according to the start and end position of the answer.
+    def pre_proc(text):
+        '''normalize spaces in a string.'''
+        text = re.sub('\s+', ' ', text)
+        return text
+    context_iter = (pre_proc(c) for c in train.context)
+    context_tokens = [[w.text for w in doc] for doc in nlp.pipe(
+        context_iter, batch_size=args.batch_size, n_threads=args.threads)]
+    log.info('got intial tokens.')
 
-    Args:
-        context (str): the context passage
-        context_token (list): list of tokens (str) in the context passage
-        answer_start (int): the start position of the answer in the passage
-        answer_end (int): the end position of the answer in the passage
 
-    Returns:
-        (int, int): start index and end index of answer
-    '''
-    p_str = 0
-    p_token = 0
-    while p_str < len(context):
-        if re.match('\s', context[p_str]):
-            p_str += 1
-            continue
-        token = context_token[p_token]
-        token_len = len(token)
-        if context[p_str:p_str + token_len] != token:
-            return (None, None)
-        if p_str == answer_start:
-            t_start = p_token
-        p_str += token_len
-        if p_str == answer_end:
-            try:
-                return (t_start, p_token)
-            except UnboundLocalError as e:
+    def get_answer_index(context, context_token, answer_start, answer_end):
+        '''
+        Get exact indices of the answer in the tokens of the passage,
+        according to the start and end position of the answer.
+
+        Args:
+            context (str): the context passage
+            context_token (list): list of tokens (str) in the context passage
+            answer_start (int): the start position of the answer in the passage
+            answer_end (int): the end position of the answer in the passage
+
+        Returns:
+            (int, int): start index and end index of answer
+        '''
+        p_str = 0
+        p_token = 0
+        while p_str < len(context):
+            if re.match('\s', context[p_str]):
+                p_str += 1
+                continue
+            token = context_token[p_token]
+            token_len = len(token)
+            if context[p_str:p_str + token_len] != token:
                 return (None, None)
-        p_token += 1
-    return (None, None)
-train['answer_start_token'], train['answer_end_token'] = \
-    zip(*[get_answer_index(a, b, c, d) for a, b, c, d in
-          zip(train.context, context_tokens,
-              train.answer_start, train.answer_end)])
-initial_len = len(train)
-train.dropna(inplace=True)
-log.info('drop {} inconsistent samples.'.format(initial_len - len(train)))
-log.info('answer pointer generated.')
+            if p_str == answer_start:
+                t_start = p_token
+            p_str += token_len
+            if p_str == answer_end:
+                try:
+                    return (t_start, p_token)
+                except UnboundLocalError as e:
+                    return (None, None)
+            p_token += 1
+        return (None, None)
+    train['answer_start_token'], train['answer_end_token'] = \
+        zip(*[get_answer_index(a, b, c, d) for a, b, c, d in
+              zip(train.context, context_tokens,
+                  train.answer_start, train.answer_end)])
+    initial_len = len(train)
+    train.dropna(inplace=True)
+    log.info('drop {} inconsistent samples.'.format(initial_len - len(train)))
+    log.info('answer pointer generated.')
 
-questions = list(train.question) + list(dev.question)
-contexts = list(train.context) + list(dev.context)
+    questions = list(train.question) + list(dev.question)
+    contexts = list(train.context) + list(dev.context)
 
-nlp = spacy.load('en')
-log.info('nlp loaded')
-context_text = [pre_proc(c) for c in contexts]
-question_text = [pre_proc(q) for q in questions]
-log.info('text preprocessed')
-question_docs = [doc for doc in nlp.pipe(
-    iter(question_text), batch_size=args.batch_size, n_threads=args.threads)]
-context_docs = [doc for doc in nlp.pipe(
-    iter(context_text), batch_size=args.batch_size, n_threads=args.threads)]
-log.info('context documents processed with nlp')
-if args.wv_cased:
-    question_tokens = [[normalize_text(w.text) for w in doc] for doc in question_docs]
-    context_tokens = [[normalize_text(w.text) for w in doc] for doc in context_docs]
-else:
-    question_tokens = [[normalize_text(w.text).lower() for w in doc] for doc in question_docs]
-    context_tokens = [[normalize_text(w.text).lower() for w in doc] for doc in context_docs]
-context_token_span = [[(w.idx, w.idx + len(w.text)) for w in doc] for doc in context_docs]
-context_tags = [[w.tag_ for w in doc] for doc in context_docs]
-context_ents = [[w.ent_type_ for w in doc] for doc in context_docs]
-context_features = []
-for question, context in zip(question_docs, context_docs):
-    question_word = {w.text for w in question}
-    question_lower = {w.text.lower() for w in question}
-    question_lemma = {w.lemma_ if w.lemma_ != '-PRON-' else w.text.lower() for w in question}
-    match_origin = [w.text in question_word for w in context]
-    match_lower = [w.text.lower() in question_lower for w in context]
-    match_lemma = [(w.lemma_ if w.lemma_ != '-PRON-' else w.text.lower()) in question_lemma for w in context]
-    context_features.append(list(zip(match_origin, match_lower, match_lemma)))
-log.info('tokens generated')
-
-
-def build_vocab(questions, contexts):
-    '''
-    Build vocabulary sorted by global word frequency, or consider frequencies in questions first,
-    which is controlled by `args.sort_all`.
-    '''
-    if args.sort_all:
-        counter = collections.Counter(w for doc in questions + contexts for w in doc)
-        vocab = sorted([t for t in counter if t in wv_vocab], key=counter.get, reverse=True)
+    nlp = spacy.load('en')
+    log.info('nlp loaded')
+    context_text = [pre_proc(c) for c in contexts]
+    question_text = [pre_proc(q) for q in questions]
+    log.info('text preprocessed')
+    question_docs = [doc for doc in nlp.pipe(
+        iter(question_text), batch_size=args.batch_size, n_threads=args.threads)]
+    context_docs = [doc for doc in nlp.pipe(
+        iter(context_text), batch_size=args.batch_size, n_threads=args.threads)]
+    log.info('context documents processed with nlp')
+    if args.wv_cased:
+        question_tokens = [[normalize_text(w.text) for w in doc] for doc in question_docs]
+        context_tokens = [[normalize_text(w.text) for w in doc] for doc in context_docs]
     else:
-        counter_q = collections.Counter(w for doc in questions for w in doc)
-        counter_c = collections.Counter(w for doc in contexts for w in doc)
-        counter = counter_c + counter_q
-        vocab = sorted([t for t in counter_q if t in wv_vocab], key=counter_q.get, reverse=True)
-        vocab += sorted([t for t in counter_c.keys() - counter_q.keys() if t in wv_vocab],
-                        key=counter.get, reverse=True)
-    total = sum(counter.values())
-    matched = sum(counter[t] for t in vocab)
-    log.info('vocab coverage {1}/{0} | OOV occurrence {2}/{3} ({4:.4f}%)'.format(
-        len(counter), len(vocab), (total - matched), total, (total - matched) / total * 100))
-    vocab.insert(0, "<PAD>")
-    vocab.insert(1, "<UNK>")
-    return vocab, counter
+        question_tokens = [[normalize_text(w.text).lower() for w in doc] for doc in question_docs]
+        context_tokens = [[normalize_text(w.text).lower() for w in doc] for doc in context_docs]
+    context_token_span = [[(w.idx, w.idx + len(w.text)) for w in doc] for doc in context_docs]
+    context_tags = [[w.tag_ for w in doc] for doc in context_docs]
+    context_ents = [[w.ent_type_ for w in doc] for doc in context_docs]
+    context_features = []
+    for question, context in zip(question_docs, context_docs):
+        question_word = {w.text for w in question}
+        question_lower = {w.text.lower() for w in question}
+        question_lemma = {w.lemma_ if w.lemma_ != '-PRON-' else w.text.lower() for w in question}
+        match_origin = [w.text in question_word for w in context]
+        match_lower = [w.text.lower() in question_lower for w in context]
+        match_lemma = [(w.lemma_ if w.lemma_ != '-PRON-' else w.text.lower()) in question_lemma for w in context]
+        context_features.append(list(zip(match_origin, match_lower, match_lemma)))
+    log.info('tokens generated')
 
 
-def token2id(docs, vocab, unk_id=None):
-    w2id = {w: i for i, w in enumerate(vocab)}
-    ids = [[w2id[w] if w in w2id else unk_id for w in doc] for doc in docs]
-    return ids
-log.info('Building vocab')
-vocab, counter = build_vocab(question_tokens, context_tokens)
-log.info('done')
-# tokens
-log.info('getting ids of tokens')
-question_ids = token2id(question_tokens, vocab, unk_id=1)
-context_ids = token2id(context_tokens, vocab, unk_id=1)
-log.info('done')
-# term frequency in document
-context_tf = []
-for doc in context_tokens:
-    counter_ = collections.Counter(w.lower() for w in doc)
-    total = sum(counter_.values())
-    context_tf.append([counter_[w.lower()] / total for w in doc])
-log.info('term frequencies')
-context_features = [[list(w) + [tf] for w, tf in zip(doc, tfs)] for doc, tfs in
-                    zip(context_features, context_tf)]
-log.info('done')
-# tags
-vocab_tag = list(nlp.tagger.tag_names)
-context_tag_ids = token2id(context_tags, vocab_tag)
-# entities, build dict on the fly
-counter_ent = collections.Counter(w for doc in context_ents for w in doc)
-vocab_ent = sorted(counter_ent, key=counter_ent.get, reverse=True)
-log.info('Found {} POS tags.'.format(len(vocab_tag)))
-log.info('Found {} entity tags: {}'.format(len(vocab_ent), vocab_ent))
-context_ent_ids = token2id(context_ents, vocab_ent)
-log.info('vocab built.')
+    def build_vocab(questions, contexts):
+        '''
+        Build vocabulary sorted by global word frequency, or consider frequencies in questions first,
+        which is controlled by `args.sort_all`.
+        '''
+        if args.sort_all:
+            counter = collections.Counter(w for doc in questions + contexts for w in doc)
+            vocab = sorted([t for t in counter if t in wv_vocab], key=counter.get, reverse=True)
+        else:
+            counter_q = collections.Counter(w for doc in questions for w in doc)
+            counter_c = collections.Counter(w for doc in contexts for w in doc)
+            counter = counter_c + counter_q
+            vocab = sorted([t for t in counter_q if t in wv_vocab], key=counter_q.get, reverse=True)
+            vocab += sorted([t for t in counter_c.keys() - counter_q.keys() if t in wv_vocab],
+                            key=counter.get, reverse=True)
+        total = sum(counter.values())
+        matched = sum(counter[t] for t in vocab)
+        log.info('vocab coverage {1}/{0} | OOV occurrence {2}/{3} ({4:.4f}%)'.format(
+            len(counter), len(vocab), (total - matched), total, (total - matched) / total * 100))
+        vocab.insert(0, "<PAD>")
+        vocab.insert(1, "<UNK>")
+        return vocab, counter
 
 
-def build_embedding(embed_file, targ_vocab, dim_vec):
-    vocab_size = len(targ_vocab)
-    emb = np.zeros((vocab_size, dim_vec))
-    w2id = {w: i for i, w in enumerate(targ_vocab)}
-    with open(embed_file) as f:
-        for line in f:
-            elems = line.split()
-            token = normalize_text(''.join(elems[0:-wv_dim]))
-            if token in w2id:
-                emb[w2id[token]] = [float(v) for v in elems[-wv_dim:]]
-    return emb
-log.info('building embedding')
-embedding = build_embedding(wv_file, vocab, wv_dim)
-log.info('got embedding matrix.')
+    def token2id(docs, vocab, unk_id=None):
+        w2id = {w: i for i, w in enumerate(vocab)}
+        ids = [[w2id[w] if w in w2id else unk_id for w in doc] for doc in docs]
+        return ids
+    log.info('Building vocab')
+    vocab, counter = build_vocab(question_tokens, context_tokens)
+    log.info('done')
+    # tokens
+    log.info('getting ids of tokens')
+    question_ids = token2id(question_tokens, vocab, unk_id=1)
+    context_ids = token2id(context_tokens, vocab, unk_id=1)
+    log.info('done')
+    # term frequency in document
+    context_tf = []
+    for doc in context_tokens:
+        counter_ = collections.Counter(w.lower() for w in doc)
+        total = sum(counter_.values())
+        context_tf.append([counter_[w.lower()] / total for w in doc])
+    log.info('term frequencies')
+    context_features = [[list(w) + [tf] for w, tf in zip(doc, tfs)] for doc, tfs in
+                        zip(context_features, context_tf)]
+    log.info('done')
+    # tags
+    vocab_tag = list(nlp.tagger.tag_names)
+    context_tag_ids = token2id(context_tags, vocab_tag)
+    # entities, build dict on the fly
+    counter_ent = collections.Counter(w for doc in context_ents for w in doc)
+    vocab_ent = sorted(counter_ent, key=counter_ent.get, reverse=True)
+    log.info('Found {} POS tags.'.format(len(vocab_tag)))
+    log.info('Found {} entity tags: {}'.format(len(vocab_ent), vocab_ent))
+    context_ent_ids = token2id(context_ents, vocab_ent)
+    log.info('vocab built.')
 
-train.to_csv('SQuAD/train.csv', index=False)
-dev.to_csv('SQuAD/dev.csv', index=False)
-meta = {
-    'vocab': vocab,
-    'embedding': embedding.tolist()
-}
-log.info('dump to file')
-with open('SQuAD/meta.msgpack', 'wb') as f:
-    msgpack.dump(meta, f)
-result = {
-    'trn_question_ids': question_ids[:len(train)],
-    'dev_question_ids': question_ids[len(train):],
-    'trn_context_ids': context_ids[:len(train)],
-    'dev_context_ids': context_ids[len(train):],
-    'trn_context_features': context_features[:len(train)],
-    'dev_context_features': context_features[len(train):],
-    'trn_context_tags': context_tag_ids[:len(train)],
-    'dev_context_tags': context_tag_ids[len(train):],
-    'trn_context_ents': context_ent_ids[:len(train)],
-    'dev_context_ents': context_ent_ids[len(train):],
-    'trn_context_text': context_text[:len(train)],
-    'dev_context_text': context_text[len(train):],
-    'trn_context_spans': context_token_span[:len(train)],
-    'dev_context_spans': context_token_span[len(train):]
-}
-with open('SQuAD/data.msgpack', 'wb') as f:
-    msgpack.dump(result, f)
-if args.sample_size:
-    sample_size = args.sample_size
-    sample = {
-        'trn_question_ids': result['trn_question_ids'][:sample_size],
-        'dev_question_ids': result['dev_question_ids'][:sample_size],
-        'trn_context_ids': result['trn_context_ids'][:sample_size],
-        'dev_context_ids': result['dev_context_ids'][:sample_size],
-        'trn_context_features': result['trn_context_features'][:sample_size],
-        'dev_context_features': result['dev_context_features'][:sample_size],
-        'trn_context_tags': result['trn_context_tags'][:sample_size],
-        'dev_context_tags': result['dev_context_tags'][:sample_size],
-        'trn_context_ents': result['trn_context_ents'][:sample_size],
-        'dev_context_ents': result['dev_context_ents'][:sample_size],
-        'trn_context_text': result['trn_context_text'][:sample_size],
-        'dev_context_text': result['dev_context_text'][:sample_size],
-        'trn_context_spans': result['trn_context_spans'][:sample_size],
-        'dev_context_spans': result['dev_context_spans'][:sample_size]
+
+    def build_embedding(embed_file, targ_vocab, dim_vec):
+        vocab_size = len(targ_vocab)
+        emb = np.zeros((vocab_size, dim_vec))
+        w2id = {w: i for i, w in enumerate(targ_vocab)}
+        with open(embed_file) as f:
+            for line in f:
+                elems = line.split()
+                token = normalize_text(''.join(elems[0:-wv_dim]))
+                if token in w2id:
+                    emb[w2id[token]] = [float(v) for v in elems[-wv_dim:]]
+        return emb
+    log.info('building embedding')
+    embedding = build_embedding(wv_file, vocab, wv_dim)
+    log.info('got embedding matrix.')
+
+    train.to_csv('SQuAD/train.csv', index=False)
+    dev.to_csv('SQuAD/dev.csv', index=False)
+    meta = {
+        'vocab': vocab,
+        'embedding': embedding.tolist()
     }
-    with open('SQuAD/sample.msgpack', 'wb') as f:
-        msgpack.dump(sample, f)
-log.info('saved to disk.')
+    log.info('dump to file')
+    with open('SQuAD/meta.msgpack', 'wb') as f:
+        msgpack.dump(meta, f)
+    result = {
+        'trn_question_ids': question_ids[:len(train)],
+        'dev_question_ids': question_ids[len(train):],
+        'trn_context_ids': context_ids[:len(train)],
+        'dev_context_ids': context_ids[len(train):],
+        'trn_context_features': context_features[:len(train)],
+        'dev_context_features': context_features[len(train):],
+        'trn_context_tags': context_tag_ids[:len(train)],
+        'dev_context_tags': context_tag_ids[len(train):],
+        'trn_context_ents': context_ent_ids[:len(train)],
+        'dev_context_ents': context_ent_ids[len(train):],
+        'trn_context_text': context_text[:len(train)],
+        'dev_context_text': context_text[len(train):],
+        'trn_context_spans': context_token_span[:len(train)],
+        'dev_context_spans': context_token_span[len(train):]
+    }
+    with open('SQuAD/data.msgpack', 'wb') as f:
+        msgpack.dump(result, f)
+    if args.sample_size:
+        sample_size = args.sample_size
+        sample = {
+            'trn_question_ids': result['trn_question_ids'][:sample_size],
+            'dev_question_ids': result['dev_question_ids'][:sample_size],
+            'trn_context_ids': result['trn_context_ids'][:sample_size],
+            'dev_context_ids': result['dev_context_ids'][:sample_size],
+            'trn_context_features': result['trn_context_features'][:sample_size],
+            'dev_context_features': result['dev_context_features'][:sample_size],
+            'trn_context_tags': result['trn_context_tags'][:sample_size],
+            'dev_context_tags': result['dev_context_tags'][:sample_size],
+            'trn_context_ents': result['trn_context_ents'][:sample_size],
+            'dev_context_ents': result['dev_context_ents'][:sample_size],
+            'trn_context_text': result['trn_context_text'][:sample_size],
+            'dev_context_text': result['dev_context_text'][:sample_size],
+            'trn_context_spans': result['trn_context_spans'][:sample_size],
+            'dev_context_spans': result['dev_context_spans'][:sample_size]
+        }
+        with open('SQuAD/sample.msgpack', 'wb') as f:
+            msgpack.dump(sample, f)
+    log.info('saved to disk.')
 
-del(train)
-del(dev)
-del(context_iter)
-del(questions)
-del(contexts)
-del(context_text)
-del(question_text)
-del(question_docs)
-del(context_docs)
-del(question_tokens)
-del(context_tokens)
-del(context_token_span)
-del(context_tags)
-del(context_ents)
-del(question_ids)
-del(context_ids)
-del(context_tf)
-del(context_features)
-del(context_tag_ids)
-del(context_ent_ids)
-del(result)
-gc.collect()
+    del(train)
+    del(dev)
+    del(context_iter)
+    del(questions)
+    del(contexts)
+    del(context_text)
+    del(question_text)
+    del(question_docs)
+    del(context_docs)
+    del(question_tokens)
+    del(context_tokens)
+    del(context_token_span)
+    del(context_tags)
+    del(context_ents)
+    del(question_ids)
+    del(context_ids)
+    del(context_tf)
+    del(context_features)
+    del(context_tag_ids)
+    del(context_ent_ids)
+    del(result)
+    gc.collect()
+    relevant = [vocab, vocab_tag, vocab_ent]
+    with open('preprocess_cache', 'wb') as fl:
+        pickle.dump(relevant, fl)
+
+log.info('Releading from cache')
+with open('preprocess_cache', 'rb') as fl:
+    relevant = pickle.load(fl)
+    vocab, vocab_tag, vocab_ent = relevant
+
+log.info('loadding NLP pipeline')
+nlp = spacy.load('en')
 
 
 def live_preprocess(context, question):
