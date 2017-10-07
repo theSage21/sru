@@ -244,7 +244,7 @@ class BatchGen:
             data = [data[i] for i in indices]
         print(type(data))
         if len(data) < batch_size:
-            data = (data * batch_size)[:batch_size)
+            data = (data * batch_size)[:batch_size]
         # chunk into batches
         data = [data[i:i + batch_size] for i in range(0, len(data), batch_size)]
         self.data = data
