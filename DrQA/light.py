@@ -100,6 +100,18 @@ def proc_dev(article):
     return rows
 
 
+def pre_proc(text):
+    '''normalize spaces in a string.'''
+    text = re.sub('\s+', ' ', text)
+    return text
+
+
+def token2id(docs, vocab, unk_id=None):
+    w2id = {w: i for i, w in enumerate(vocab)}
+    ids = [[w2id[w] if w in w2id else unk_id for w in doc] for doc in docs]
+    return ids
+
+
 if not os.path.exists('preprocess_cache'):
     log.info('FLATTENING JSON for train and dev')
     train = flatten_json(trn_file, proc_train)
@@ -115,10 +127,6 @@ if not os.path.exists('preprocess_cache'):
     nlp = spacy.load('en', parser=False, tagger=False, entity=False)
 
 
-    def pre_proc(text):
-        '''normalize spaces in a string.'''
-        text = re.sub('\s+', ' ', text)
-        return text
     context_iter = (pre_proc(c) for c in train.context)
     context_tokens = [[w.text for w in doc] for doc in nlp.pipe(
         context_iter, batch_size=args.batch_size, n_threads=args.threads)]
@@ -226,10 +234,6 @@ if not os.path.exists('preprocess_cache'):
         return vocab, counter
 
 
-    def token2id(docs, vocab, unk_id=None):
-        w2id = {w: i for i, w in enumerate(vocab)}
-        ids = [[w2id[w] if w in w2id else unk_id for w in doc] for doc in docs]
-        return ids
     log.info('Building vocab')
     vocab, counter = build_vocab(question_tokens, context_tokens)
     log.info('done')
