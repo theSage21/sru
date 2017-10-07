@@ -31,7 +31,7 @@
                     var c = $("#context_holder").val();
                     var data = {"paragraph": c, "question": q};
                     console.log(data);
-                    var url = "/get_context";
+                    var url = "/get-context";
                     $.ajax({type: 'POST',
                             url: url,
                             data: JSON.stringify(data),
