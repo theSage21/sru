@@ -340,7 +340,6 @@ del(context_features)
 del(context_tag_ids)
 del(context_ent_ids)
 del(result)
-del(sample)
 gc.collect()
 
 
