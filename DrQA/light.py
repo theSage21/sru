@@ -393,6 +393,13 @@ def live_preprocess(context, question):
                         in question_lemma) for w in context]
         context_features.append(list(zip(match_origin, match_lower,
                                          match_lemma)))
+        context_tf = []
+        for doc in context_tokens:
+            counter_ = collections.Counter(w.lower() for w in doc)
+            total = sum(counter_.values())
+            context_tf.append([counter_[w.lower()] / total for w in doc])
+        context_features = [[list(w) + [tf] for w, tf in zip(doc, tfs)] for doc, tfs in
+                            zip(context_features, context_tf)]
 
     question_ids = token2id(question_tokens, vocab, unk_id=1)
     context_ids = token2id(context_tokens, vocab, unk_id=1)
