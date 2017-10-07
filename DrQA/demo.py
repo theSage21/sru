@@ -97,7 +97,7 @@ model_dir = os.path.abspath(model_dir)
 
 # set random seed
 seed = args.seed if args.seed >= 0 else int(random.random()*1000)
-print ('seed:', seed)
+print('seed:', seed)
 random.seed(seed)
 torch.manual_seed(seed)
 if args.cuda:
@@ -174,7 +174,7 @@ def main():
                            evaluation=True, gpu=args.cuda)
         predictions = []
         for batch in batches:
-            predictions.extend(model.predict(batch))
+            predictions.append(model.predict(batch))
         print(predictions)
         return {'result': predictions}
 
@@ -242,7 +242,6 @@ class BatchGen:
             indices = list(range(len(data)))
             random.shuffle(indices)
             data = [data[i] for i in indices]
-        print(type(data))
         if len(data) < batch_size:
             data = (data * batch_size)[:batch_size]
         # chunk into batches
