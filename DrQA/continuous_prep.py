@@ -378,7 +378,7 @@ def live_preprocess(context, question):
     context_ids = token2id(context_tokens, vocab, unk_id=1)
     context_tag_ids = token2id(context_tags, vocab_tag)
     context_ent_ids = token2id(context_ents, vocab_ent)
-    dev = {
+    data = {
             'dev_question_ids': question_ids,
             'dev_context_ids': context_ids,
             'dev_context_features': context_features,
@@ -387,4 +387,13 @@ def live_preprocess(context, question):
             'dev_context_text': context_text,
             'dev_context_spans': context_token_span
             }
+    dev = list(zip(
+        data['dev_context_ids'],
+        data['dev_context_features'],
+        data['dev_context_tags'],
+        data['dev_context_ents'],
+        data['dev_question_ids'],
+        data['dev_context_text'],
+        data['dev_context_spans']
+    ))
     return dev
