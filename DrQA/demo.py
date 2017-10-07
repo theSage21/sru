@@ -178,7 +178,7 @@ def main():
         print(predictions)
         return {'result': predictions}
 
-    app.run(debug=True, port=6006, host='0.0.0.0', reloader=True)
+    app.run(debug=True, port=6006, host='0.0.0.0', reloader=False)
 
 
 def lr_decay(optimizer, lr_decay):
