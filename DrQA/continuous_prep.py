@@ -98,13 +98,14 @@ def proc_dev(article):
 logging.info('FLATTENING JSON for train and dev')
 train = flatten_json(trn_file, proc_train)
 logging.info('done')
+g
 train = pd.DataFrame(train,
                      columns=['id', 'context', 'question', 'answer',
                               'answer_start', 'answer_end'])
 dev = flatten_json(dev_file, proc_dev)
 dev = pd.DataFrame(dev,
                    columns=['id', 'context', 'question', 'answers'])
-log.info('json data flattened.')
+logging.info('json data flattened.')
 
 nlp = spacy.load('en', parser=False, tagger=False, entity=False)
 
@@ -166,12 +167,15 @@ questions = list(train.question) + list(dev.question)
 contexts = list(train.context) + list(dev.context)
 
 nlp = spacy.load('en')
+log.info('nlp loaded')
 context_text = [pre_proc(c) for c in contexts]
 question_text = [pre_proc(q) for q in questions]
+log.info('text preprocessed')
 question_docs = [doc for doc in nlp.pipe(
     iter(question_text), batch_size=args.batch_size, n_threads=args.threads)]
 context_docs = [doc for doc in nlp.pipe(
     iter(context_text), batch_size=args.batch_size, n_threads=args.threads)]
+log.info('context documents processed with nlp')
 if args.wv_cased:
     question_tokens = [[normalize_text(w.text) for w in doc] for doc in question_docs]
     context_tokens = [[normalize_text(w.text) for w in doc] for doc in context_docs]
@@ -221,18 +225,24 @@ def token2id(docs, vocab, unk_id=None):
     w2id = {w: i for i, w in enumerate(vocab)}
     ids = [[w2id[w] if w in w2id else unk_id for w in doc] for doc in docs]
     return ids
+log.info('Building vocab')
 vocab, counter = build_vocab(question_tokens, context_tokens)
+log.info('done')
 # tokens
+log.info('getting ids of tokens')
 question_ids = token2id(question_tokens, vocab, unk_id=1)
 context_ids = token2id(context_tokens, vocab, unk_id=1)
+log.info('done')
 # term frequency in document
 context_tf = []
 for doc in context_tokens:
     counter_ = collections.Counter(w.lower() for w in doc)
     total = sum(counter_.values())
     context_tf.append([counter_[w.lower()] / total for w in doc])
+log.info('term frequencies')
 context_features = [[list(w) + [tf] for w, tf in zip(doc, tfs)] for doc, tfs in
                     zip(context_features, context_tf)]
+log.info('done')
 # tags
 vocab_tag = list(nlp.tagger.tag_names)
 context_tag_ids = token2id(context_tags, vocab_tag)
@@ -256,6 +266,7 @@ def build_embedding(embed_file, targ_vocab, dim_vec):
             if token in w2id:
                 emb[w2id[token]] = [float(v) for v in elems[-wv_dim:]]
     return emb
+log.info('building embedding')
 embedding = build_embedding(wv_file, vocab, wv_dim)
 log.info('got embedding matrix.')
 
@@ -265,6 +276,7 @@ meta = {
     'vocab': vocab,
     'embedding': embedding.tolist()
 }
+log.info('dump to file')
 with open('SQuAD/meta.msgpack', 'wb') as f:
     msgpack.dump(meta, f)
 result = {
