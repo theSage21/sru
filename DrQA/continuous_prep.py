@@ -95,17 +95,16 @@ def proc_dev(article):
             answers = [a['text'] for a in answers]
             rows.append((id_, context, question, answers))
     return rows
-logging.info('FLATTENING JSON for train and dev')
+log.info('FLATTENING JSON for train and dev')
 train = flatten_json(trn_file, proc_train)
-logging.info('done')
-g
+log.info('done')
 train = pd.DataFrame(train,
                      columns=['id', 'context', 'question', 'answer',
                               'answer_start', 'answer_end'])
 dev = flatten_json(dev_file, proc_dev)
 dev = pd.DataFrame(dev,
                    columns=['id', 'context', 'question', 'answers'])
-logging.info('json data flattened.')
+log.info('json data flattened.')
 
 nlp = spacy.load('en', parser=False, tagger=False, entity=False)
 
