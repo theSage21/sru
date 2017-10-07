@@ -12,7 +12,7 @@ import msgpack
 import pandas as pd
 from drqa.model import DocReaderModel
 from drqa.utils import str2bool
-from continuous_prep import live_preprocess
+from light import live_preprocess
 
 parser = argparse.ArgumentParser(
     description='Train a Document Reader model.'
