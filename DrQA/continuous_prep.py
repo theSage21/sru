@@ -1,4 +1,5 @@
 import re
+import gc
 import json
 import spacy
 import msgpack
@@ -318,6 +319,30 @@ if args.sample_size:
         msgpack.dump(sample, f)
 log.info('saved to disk.')
 
+del(train)
+del(dev)
+del(context_iter)
+del(questions)
+del(contexts)
+del(context_text)
+del(question_text)
+del(question_docs)
+del(context_docs)
+del(question_tokens)
+del(context_tokens)
+del(context_token_span)
+del(context_tags)
+del(context_ents)
+del(question_ids)
+del(context_ids)
+del(context_tf)
+del(context_features)
+del(context_tag_ids)
+del(context_ent_ids)
+del(result)
+del(sample)
+gc.collect()
+
 
 def live_preprocess(context, question):
     "Produce live dictionary for running the code"
@@ -350,21 +375,17 @@ def live_preprocess(context, question):
         context_features.append(list(zip(match_origin, match_lower,
                                          match_lemma)))
 
-    question_tokens = [[normalize_text(w.text) for w in doc]
-                       for doc in question_docs]
-    context_tokens = [[normalize_text(w.text) for w in doc]
-                      for doc in context_docs]
     question_ids = token2id(question_tokens, vocab, unk_id=1)
     context_ids = token2id(context_tokens, vocab, unk_id=1)
     context_tag_ids = token2id(context_tags, vocab_tag)
     context_ent_ids = token2id(context_ents, vocab_ent)
     dev = {
-            'dev_question_ids': question_ids[len(train):],
-            'dev_context_ids': context_ids[len(train):],
-            'dev_context_features': context_features[len(train):],
-            'dev_context_tags': context_tag_ids[len(train):],
-            'dev_context_ents': context_ent_ids[len(train):],
-            'dev_context_text': context_text[len(train):],
-            'dev_context_spans': context_token_span[len(train):]
+            'dev_question_ids': question_ids,
+            'dev_context_ids': context_ids,
+            'dev_context_features': context_features,
+            'dev_context_tags': context_tag_ids,
+            'dev_context_ents': context_ent_ids,
+            'dev_context_text': context_text,
+            'dev_context_spans': context_token_span
             }
     return dev
