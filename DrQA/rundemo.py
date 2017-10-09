@@ -50,6 +50,10 @@ class CONFIG:
         self.dropout_rnn_output = True
         self.max_len = 15
         self.rnn_type = 'lstm'
+        self.rnn_padding = False
+        self.save_last_only = False
+        self.eval_per_epoch = 1
+        self.cuda = False
 
 
 args = CONFIG()
