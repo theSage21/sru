@@ -15,13 +15,15 @@
                     <b id='request_status'></b>
                     <tbody>
                         <tr>
+                            <td>Context</td>
                             <td><textarea id='context_holder' rows=50 cols=150></textarea></td>
                         </tr>
                         <tr>
-                            <td><textarea id='question_holder' rows=50 cols=100></textarea></td><td><button id='go'>Get Answer</button></td>
+                            <td><button id='go'>Get Answer</button></td>
+                            <td><textarea id='question_holder' rows=50 cols=100></textarea></td>
                         </tr>
                         <tr>
-                            <td><p id='answer_holder'></p></td>
+                            <td>Answer</td><td><p id='answer_holder'></p></td>
                         </tr>
                     </tbody>
                 </table>
@@ -46,6 +48,7 @@
                                 var ans = retdata['answer'];
                                 console.log(ans);
                                 $("#answer_holder").text(ans);
+                                $("#question_holder").text(q);
                                 console.log('OK');
                             },
                             contentType: "application/json",
