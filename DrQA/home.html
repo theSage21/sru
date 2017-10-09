@@ -46,11 +46,18 @@
                                 var ans = retdata['answer'];
                                 console.log(ans);
                                 $("#answer_holder").text(ans);
+                                console.log('OK');
                             },
                             contentType: "application/json",
                             dataType: 'json'
                     });
                 });
+            // enter button compatibility
+            $("#question_holder").keyup(function(event){
+                    if(event.keyCode == 13){
+                                $("#go").click();
+                                    }
+            });
             </script>
         </div>
     </body>
