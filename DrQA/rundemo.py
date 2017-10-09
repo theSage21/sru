@@ -25,7 +25,6 @@ class CONFIG:
         self.resume = 'best_model.pt'
         self.fix_embeddings = False
         self.data_file = 'SQuAD/data.msgpack'
-        self.resume = True
 
 
 args = CONFIG()
