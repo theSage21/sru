@@ -25,6 +25,31 @@ class CONFIG:
         self.resume = 'best_model.pt'
         self.fix_embeddings = False
         self.data_file = 'SQuAD/data.msgpack'
+        self.tune_partial = 1000
+        self.question_merge = 'self_attn'
+        self.doc_layers = 5
+        self.question_layers = 5
+        self.hidden_size = 128
+        self.num_features = 4
+        self.pos = True
+        self.reduce_lr = 0.
+        self.optimizer = 'adamax'
+        self.grad_clipping = 20
+        self.weight_decay = 0
+        self.learning_rate = 0.001
+        self.momentum = 0
+        self.pos_size = 56
+        self.pos_dim = 56
+        self.ner = True
+        self.ner_size = 19
+        self.ner_dim = 19
+        self.use_qemb = True
+        self.concat_rnn_layers = False
+        self.dropout_emb = 0.5
+        self.dropout_rnn = 0.2
+        self.dropout_rnn_output = True
+        self.max_len = 15
+        self.rnn_type = 'lstm'
 
 
 args = CONFIG()
