@@ -133,12 +133,6 @@ def main():
             random.shuffle(list(range(len(train))))  # synchronize random seed
         if args.reduce_lr:
             lr_decay(model.optimizer, lr_decay=args.reduce_lr)
-        batches = BatchGen(dev, batch_size=1, evaluation=True, gpu=args.cuda)
-        predictions = []
-        for batch in batches:
-            predictions.extend(model.predict(batch))
-        em, f1 = score(predictions, dev_y)
-        log.info("[dev EM: {} F1: {}]".format(em, f1))
     else:
         raise Exception('Demo without resuming from a saved model')
 
