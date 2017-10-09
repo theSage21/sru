@@ -170,13 +170,13 @@ def main():
         paragraph = bottle.request.json['paragraph']
         question = bottle.request.json['question']
         dev = live_preprocess(paragraph, question)
-        batches = BatchGen(dev, batch_size=args.batch_size,
+        batches = BatchGen(dev, batch_size=1,
                            evaluation=True, gpu=args.cuda)
         predictions = []
         for batch in batches:
-            predictions.append(model.predict(batch))
+            predictions.extend(model.predict(batch))
         print(predictions)
-        return {'result': predictions}
+        return {'result': predictions[0]}
 
     app.run(debug=True, port=6006, host='0.0.0.0', reloader=False)
 
@@ -242,8 +242,6 @@ class BatchGen:
             indices = list(range(len(data)))
             random.shuffle(indices)
             data = [data[i] for i in indices]
-        if len(data) < batch_size:
-            data = (data * batch_size)[:batch_size]
         # chunk into batches
         data = [data[i:i + batch_size] for i in range(0, len(data), batch_size)]
         self.data = data
