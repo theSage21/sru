@@ -45,7 +45,7 @@
                             }, // ----------complete
                             success: function (retdata){
                                 console.log(retdata);
-                                var ans = retdata['answer'];
+                                var ans = retdata['result']['answer'];
                                 console.log(ans);
                                 $("#answer_holder").text(ans);
                                 $("#question_holder").text(q);
