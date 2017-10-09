@@ -133,6 +133,14 @@ def main():
             random.shuffle(list(range(len(train))))  # synchronize random seed
         if args.reduce_lr:
             lr_decay(model.optimizer, lr_decay=args.reduce_lr)
+
+    if args.resume:
+        batches = BatchGen(dev, batch_size=1, evaluation=True, gpu=args.cuda)
+        predictions = []
+        for batch in batches:
+            predictions.extend(model.predict(batch))
+        em, f1 = score(predictions, dev_y)
+        log.info("[dev EM: {} F1: {}]".format(em, f1))
     else:
         raise Exception('Demo without resuming from a saved model')
 
@@ -169,13 +177,12 @@ def main():
     def get_context():
         paragraph = bottle.request.json['paragraph']
         question = bottle.request.json['question']
-        dev = live_preprocess(paragraph, question)
-        batches = BatchGen(dev, batch_size=1,
+        livedata = live_preprocess(paragraph, question)
+        batches = BatchGen(livedata, batch_size=1,
                            evaluation=True, gpu=args.cuda)
         predictions = []
         for batch in batches:
             predictions.extend(model.predict(batch))
-        print(predictions)
         return {'result': predictions[0]}
 
     app.run(debug=True, port=6006, host='0.0.0.0', reloader=False)
