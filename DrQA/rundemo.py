@@ -1,10 +1,11 @@
 import os
 import re
 import torch
+import spacy
 import string
 import random
-import msgpack
 import bottle
+import msgpack
 import unicodedata
 import pandas as pd
 from collections import Counter
@@ -35,13 +36,14 @@ def main():
     random.seed(seed)
     torch.manual_seed(seed)
 
-    train, dev, dev_y, embedding, opt = load_data(vars(args))
+    train, dev, dev_y, embedding, opt, v, vt, ve = load_data(vars(args))
     checkpoint = torch.load(os.path.join(model_dir, args.resume))
     state_dict = checkpoint['state_dict']
 
     # MAIN objects
     model = DocReaderModel(opt, embedding, state_dict)
     app = bottle.Bottle()
+    nlp = spacy.load('en')
 
     print('Evaluating loaded model on SQuAD')
     batches = BatchGen(dev, batch_size=1, evaluation=True, gpu=args.cuda)
@@ -82,7 +84,7 @@ def main():
     def get_context():
         paragraph = bottle.request.json['paragraph']
         question = bottle.request.json['question']
-        livedata = live_preprocess(paragraph, question)
+        livedata = live_preprocess(paragraph, question, v, vt, ve, nlp)
         batches = BatchGen(livedata, batch_size=1,
                            evaluation=True, gpu=args.cuda)
         predictions = []
@@ -97,6 +99,9 @@ def load_data(opt):
     with open('SQuAD/meta.msgpack', 'rb') as f:
         meta = msgpack.load(f, encoding='utf8')
     embedding = torch.Tensor(meta['embedding'])
+    vocab = meta['vocab']
+    vocab_tag = meta['vocab_tag']
+    vocab_ent = meta['vocab_ent']
     opt['pretrained_words'] = True
     opt['vocab_size'] = embedding.size(0)
     opt['embedding_dim'] = embedding.size(1)
@@ -129,7 +134,7 @@ def load_data(opt):
     ))
     dev_y = dev_orig['answers'].tolist()[:len(dev)]
     dev_y = [eval(y) for y in dev_y]
-    return train, dev, dev_y, embedding, opt
+    return train, dev, dev_y, embedding, opt, vocab, vocab_tag, vocab_ent
 
 
 class BatchGen:
