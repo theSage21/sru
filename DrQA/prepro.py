@@ -262,6 +262,8 @@ def build_embedding(embed_file, targ_vocab, dim_vec):
             if token in w2id:
                 emb[w2id[token]] = [float(v) for v in elems[-wv_dim:]]
     return emb
+
+
 embedding = build_embedding(wv_file, vocab, wv_dim)
 log.info('got embedding matrix.')
 
@@ -269,7 +271,9 @@ train.to_csv('SQuAD/train.csv', index=False)
 dev.to_csv('SQuAD/dev.csv', index=False)
 meta = {
     'vocab': vocab,
-    'embedding': embedding.tolist()
+    'embedding': embedding.tolist(),
+    'vocab_tag': vocab_tag,
+    'vocab_ent': vocab_ent
 }
 with open('SQuAD/meta.msgpack', 'wb') as f:
     msgpack.dump(meta, f)
