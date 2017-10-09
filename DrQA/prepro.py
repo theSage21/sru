@@ -271,9 +271,7 @@ train.to_csv('SQuAD/train.csv', index=False)
 dev.to_csv('SQuAD/dev.csv', index=False)
 meta = {
     'vocab': vocab,
-    'embedding': embedding.tolist(),
-    'vocab_tag': vocab_tag,
-    'vocab_ent': vocab_ent
+    'embedding': embedding.tolist()
 }
 with open('SQuAD/meta.msgpack', 'wb') as f:
     msgpack.dump(meta, f)
