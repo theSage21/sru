@@ -23,6 +23,7 @@ class CONFIG:
         self.model_dir = 'models'
         self.seed = 937
         self.resume = 'best_model.pt'
+        self.fix_embeddings = False
 
 
 args = CONFIG()
