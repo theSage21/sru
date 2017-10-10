@@ -2,6 +2,7 @@ import os
 import re
 import torch
 import spacy
+import pickle
 import string
 import random
 import bottle
@@ -131,8 +132,10 @@ def load_data(opt):
         meta = msgpack.load(f, encoding='utf8')
     embedding = torch.Tensor(meta['embedding'])
     vocab = meta['vocab']
-    vocab_tag = meta['vocab_tag']
-    vocab_ent = meta['vocab_ent']
+    print('Releading from cache')
+    with open('preprocess_cache', 'rb') as fl:
+        relevant = pickle.load(fl)
+        vocab, vocab_tag, vocab_ent = relevant
     opt['pretrained_words'] = True
     opt['vocab_size'] = embedding.size(0)
     opt['embedding_dim'] = embedding.size(1)

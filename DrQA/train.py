@@ -181,6 +181,7 @@ def main():
                     model_file,
                     os.path.join(model_dir, 'best_model.pt'))
                 log.info('[new best model saved.]')
+                log.info(str(hash(model)))
 
 
 def lr_decay(optimizer, lr_decay):
