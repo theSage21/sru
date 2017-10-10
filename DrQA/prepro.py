@@ -314,3 +314,6 @@ if args.sample_size:
     with open('SQuAD/sample.msgpack', 'wb') as f:
         msgpack.dump(sample, f)
 log.info('saved to disk.')
+relevant = {'v': vocab, 'vt': vocab_tag, 've': vocab_ent}
+with open('preprocess_cache', 'wb') as fl:
+    msgpack.dump(relevant, fl)

@@ -5,7 +5,6 @@ import spacy
 import random
 import bottle
 import string
-import pickle
 import logging
 import argparse
 import unicodedata
@@ -125,8 +124,8 @@ def rundemo(model):
         raise Exception("CACHE IS NOT PRESENT")
     else:
         with open('preprocess_cache', 'rb') as fl:
-            relevant = pickle.load(fl)
-            v, vt, ve = relevant
+            v = msgpack.load(fl, encoding='utf8')
+            v, vt, ve = v['v'], v['vt'], v['ve']
 
     @app.post('/get-context')
     def getanswer():
