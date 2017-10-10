@@ -185,7 +185,7 @@ def main():
             if args.resume_options:
                 opt = checkpoint['config']
             state_dict = checkpoint['state_dict']
-            model = DocReaderModel(opt, embedding)
+            model = DocReaderModel(opt, embedding, state_dict)
             log.info(str(hash(model)))
             batches = BatchGen(dev, batch_size=1, evaluation=True, gpu=args.cuda)
             predictions = []
