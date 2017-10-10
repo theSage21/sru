@@ -1,16 +1,22 @@
-import os
 import re
-import torch
+import os
+import sys
 import spacy
-import pickle
-import string
 import random
 import bottle
-import msgpack
+import string
+import pickle
+import logging
+import argparse
 import unicodedata
-import pandas as pd
+from shutil import copyfile
+from datetime import datetime
 from collections import Counter
+import torch
+import msgpack
+import pandas as pd
 from drqa.model import DocReaderModel
+from drqa.utils import str2bool
 
 
 class CONFIG:
@@ -20,70 +26,116 @@ class CONFIG:
         self.wv_cased = True
         self.sort_all = True
         self.sample_size = 0
+        self.threads = 4
         self.batch_size = 64
-        self.model_dir = 'models'
-        self.seed = 937
-        self.resume = 'best_model.pt'
-        self.fix_embeddings = False
-        self.data_file = 'SQuAD/data.msgpack'
-        self.tune_partial = 1000
-        self.question_merge = 'self_attn'
-        self.doc_layers = 5
-        self.question_layers = 5
-        self.hidden_size = 128
-        self.num_features = 4
-        self.pos = True
-        self.reduce_lr = 0.
-        self.optimizer = 'adamax'
-        self.grad_clipping = 20
-        self.weight_decay = 0
-        self.learning_rate = 0.001
-        self.momentum = 0
-        self.pos_size = 56
-        self.pos_dim = 56
-        self.ner = True
-        self.ner_size = 19
-        self.ner_dim = 19
-        self.use_qemb = True
-        self.concat_rnn_layers = False
-        self.dropout_emb = 0.5
-        self.dropout_rnn = 0.2
-        self.dropout_rnn_output = True
-        self.max_len = 15
-        self.rnn_type = 'lstm'
-        self.rnn_padding = False
-        self.save_last_only = False
-        self.eval_per_epoch = 1
-        self.cuda = False
 
 
-args = CONFIG()
+prepargs = CONFIG()
+trn_file = 'SQuAD/train-v1.1.json'
+dev_file = 'SQuAD/dev-v1.1.json'
+wv_file = prepargs.wv_file
+wv_dim = prepargs.wv_dim
 
 
-def main():
-    model_dir = args.model_dir
-    os.makedirs(model_dir, exist_ok=True)
-    model_dir = os.path.abspath(model_dir)
-    seed = args.seed if args.seed >= 0 else int(random.random()*1000)
-    random.seed(seed)
-    torch.manual_seed(seed)
+def token2id(docs, vocab, unk_id=None):
+    w2id = {w: i for i, w in enumerate(vocab)}
+    ids = [[w2id[w] if w in w2id else unk_id for w in doc]
+           for doc in docs]
+    return ids
 
-    train, dev, dev_y, embedding, opt, v, vt, ve = load_data(vars(args))
-    checkpoint = torch.load(os.path.join(model_dir, args.resume))
-    state_dict = checkpoint['state_dict']
 
-    # MAIN objects
-    model = DocReaderModel(opt, embedding, state_dict)
+def normalize_text(text):
+    return unicodedata.normalize('NFD', text)
+
+
+def pre_proc(text):
+    '''normalize spaces in a string.'''
+    text = re.sub('\s+', ' ', text)
+    return text
+
+
+def live_preprocess(context, question, nlp, vocab, vocab_tag, vocab_ent):
+    "Produce live dictionary for running the code"
+    questions = [question]
+    contexts = [context]
+
+    context_text = [pre_proc(c) for c in contexts]
+    question_text = [pre_proc(q) for q in questions]
+
+    question_docs = [nlp(doc) for doc in question_text]
+    context_docs = [nlp(doc) for doc in context_text]
+    question_tokens = [[normalize_text(w.text) for w in doc]
+                       for doc in question_docs]
+    context_tokens = [[normalize_text(w.text) for w in doc]
+                      for doc in context_docs]
+    context_token_span = [[(w.idx, w.idx + len(w.text)) for w in doc]
+                          for doc in context_docs]
+    context_tags = [[w.tag_ for w in doc] for doc in context_docs]
+    context_ents = [[w.ent_type_ for w in doc] for doc in context_docs]
+    context_features = []
+    for question, context in zip(question_docs, context_docs):
+        question_word = {w.text for w in question}
+        question_lower = {w.text.lower() for w in question}
+        question_lemma = {w.lemma_ if w.lemma_ != '-PRON-' else w.text.lower()
+                          for w in question}
+        match_origin = [w.text in question_word for w in context]
+        match_lower = [w.text.lower() in question_lower for w in context]
+        match_lemma = [((w.lemma_ if w.lemma_ != '-PRON-' else w.text.lower())
+                        in question_lemma) for w in context]
+        context_features.append(list(zip(match_origin, match_lower,
+                                         match_lemma)))
+        context_tf = []
+        for doc in context_tokens:
+            counter_ = Counter(w.lower() for w in doc)
+            total = sum(counter_.values())
+            context_tf.append([counter_[w.lower()] / total for w in doc])
+        context_features = [[list(w) + [tf] for w, tf in zip(doc, tfs)]
+                            for doc, tfs in zip(context_features, context_tf)]
+
+    question_ids = token2id(question_tokens, vocab, unk_id=1)
+    context_ids = token2id(context_tokens, vocab, unk_id=1)
+    context_tag_ids = token2id(context_tags, vocab_tag)
+    context_ent_ids = token2id(context_ents, vocab_ent)
+    data = {
+            'dev_question_ids': question_ids,
+            'dev_context_ids': context_ids,
+            'dev_context_features': context_features,
+            'dev_context_tags': context_tag_ids,
+            'dev_context_ents': context_ent_ids,
+            'dev_context_text': context_text,
+            'dev_context_spans': context_token_span
+            }
+    dev = list(zip(
+        data['dev_context_ids'],
+        data['dev_context_features'],
+        data['dev_context_tags'],
+        data['dev_context_ents'],
+        data['dev_question_ids'],
+        data['dev_context_text'],
+        data['dev_context_spans']
+    ))
+    return dev
+
+
+def rundemo(model):
     app = bottle.Bottle()
     nlp = spacy.load('en')
 
-    print('Evaluating loaded model on SQuAD')
-    batches = BatchGen(dev, batch_size=1, evaluation=True, gpu=args.cuda)
-    predictions = []
-    for batch in batches:
-        predictions.extend(model.predict(batch))
-    em, f1 = score(predictions, dev_y)
-    print("[dev EM: {} F1: {}]".format(em, f1))
+    if not os.path.exists('preprocess_cache'):
+        raise Exception("CACHE IS NOT PRESENT")
+    else:
+        with open('preprocess_cache', 'rb') as fl:
+            relevant = pickle.load(fl)
+            v, vt, ve = relevant
+
+    @app.post('/get-context')
+    def getanswer():
+        q = bottle.request.json.get('question')
+        c = bottle.request.json.get('paragraph')
+        live = live_preprocess(c, q, nlp, v, vt, ve)
+        batches = BatchGen(live, batch_size=1, evaluation=True, gpu=args.cuda)
+        predictions = [model.predict(b) for b in batches]
+        return {'result': predictions}
 
     @app.route('/<:re:.*>', method=['OPTIONS'])
     def enableCORSGenericOptionsRoute():
@@ -92,13 +144,11 @@ def main():
 
     @app.hook('after_request')
     def add_cors_headers():
-        bottle.response.headers['Access-Control-Allow-Origin'] = '*'
-        key = 'Access-Control-Allow-Methods'
-        bottle.response.headers[key] = 'POST, OPTIONS'
-        string = 'Origin, Accept, Content-Type,'
-        string += ' X-Requested-With, X-CSRF-Token'
-        key = 'Access-Control-Allow-Headers'
-        bottle.response.headers[key] = string
+        head = bottle.response.headers
+        head['Access-Control-Allow-Origin'] = '*'
+        head['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+        string = 'Origin, Accept, Content-Type, X-Requested-With, X-CSRF-Token'
+        head['Access-Control-Allow-Headers'] = string
 
     @app.get('/')
     def demo_home():
@@ -112,36 +162,218 @@ def main():
         print(root, 'is static root')
         return bottle.static_file(filename, root=root)
 
-    @app.post('/get-context')
-    def get_context():
-        paragraph = bottle.request.json['paragraph']
-        question = bottle.request.json['question']
-        livedata = live_preprocess(paragraph, question, v, vt, ve, nlp)
-        batches = BatchGen(livedata, batch_size=1,
-                           evaluation=True, gpu=args.cuda)
+    app.run(debug=True, port=6006, host='0.0.0.0')
+
+
+parser = argparse.ArgumentParser(
+    description='Train a Document Reader model.'
+)
+# DEMO
+parser.add_argument('--rundemo', action='store_true',
+                    help='run the demo as a bottle app')
+# system
+parser.add_argument('--log_file', default='output.log',
+                    help='path for log file.')
+parser.add_argument('--log_per_updates', type=int, default=3,
+                    help='log model loss per x updates (mini-batches).')
+parser.add_argument('--data_file', default='SQuAD/data.msgpack',
+                    help='path to preprocessed data file.')
+parser.add_argument('--model_dir', default='models',
+                    help='path to store saved models.')
+parser.add_argument('--save_last_only', action='store_true',
+                    help='only save the final models.')
+parser.add_argument('--eval_per_epoch', type=int, default=1,
+                    help='perform evaluation per x epochs.')
+parser.add_argument('--seed', type=int, default=937,
+                    help='random seed for data shuffling, dropout, etc.')
+parser.add_argument("--cuda", type=str2bool, nargs='?',
+                    const=True, default=torch.cuda.is_available(),
+                    help='whether to use GPU acceleration.')
+# training
+parser.add_argument('-e', '--epochs', type=int, default=50)
+parser.add_argument('-bs', '--batch_size', type=int, default=32)
+parser.add_argument('-rs', '--resume', default='',
+                    help='previous model file name (in `model_dir`). '
+                         'e.g. "checkpoint_epoch_11.pt"')
+parser.add_argument('-ro', '--resume_options', action='store_true',
+                    help='use previous model options, ignore the cli and defaults.')
+parser.add_argument('-rlr', '--reduce_lr', type=float, default=0.,
+                    help='reduce initial (resumed) learning rate by this factor.')
+parser.add_argument('-op', '--optimizer', default='adamax',
+                    help='supported optimizer: adamax, sgd')
+parser.add_argument('-gc', '--grad_clipping', type=float, default=20)
+parser.add_argument('-wd', '--weight_decay', type=float, default=0)
+parser.add_argument('-lr', '--learning_rate', type=float, default=0.001,
+                    help='only applied to SGD.')
+parser.add_argument('-mm', '--momentum', type=float, default=0,
+                    help='only applied to SGD.')
+parser.add_argument('-tp', '--tune_partial', type=int, default=1000,
+                    help='finetune top-x embeddings.')
+parser.add_argument('--fix_embeddings', action='store_true',
+                    help='if true, `tune_partial` will be ignored.')
+parser.add_argument('--rnn_padding', action='store_true',
+                    help='perform rnn padding (much slower but more accurate).')
+# model
+parser.add_argument('--question_merge', default='self_attn')
+parser.add_argument('--doc_layers', type=int, default=5)
+parser.add_argument('--question_layers', type=int, default=5)
+parser.add_argument('--hidden_size', type=int, default=128)
+parser.add_argument('--num_features', type=int, default=4)
+parser.add_argument('--pos', type=str2bool, nargs='?', const=True, default=True,
+                    help='use pos tags as a feature.')
+parser.add_argument('--pos_size', type=int, default=56,
+                    help='how many kinds of POS tags.')
+parser.add_argument('--pos_dim', type=int, default=56,
+                    help='the embedding dimension for POS tags.')
+parser.add_argument('--ner', type=str2bool, nargs='?', const=True, default=True,
+                    help='use named entity tags as a feature.')
+parser.add_argument('--ner_size', type=int, default=19,
+                    help='how many kinds of named entity tags.')
+parser.add_argument('--ner_dim', type=int, default=19,
+                    help='the embedding dimension for named entity tags.')
+parser.add_argument('--use_qemb', type=str2bool, nargs='?', const=True, default=True)
+parser.add_argument('--concat_rnn_layers', type=str2bool, nargs='?',
+                    const=True, default=False)
+parser.add_argument('--dropout_emb', type=float, default=0.5)
+parser.add_argument('--dropout_rnn', type=float, default=0.2)
+parser.add_argument('--dropout_rnn_output', type=str2bool, nargs='?',
+                    const=True, default=True)
+parser.add_argument('--max_len', type=int, default=15)
+parser.add_argument('--rnn_type', default='lstm',
+                    help='supported types: rnn, gru, lstm')
+
+args = parser.parse_args()
+
+# set model dir
+model_dir = args.model_dir
+os.makedirs(model_dir, exist_ok=True)
+model_dir = os.path.abspath(model_dir)
+
+# set random seed
+seed = args.seed if args.seed >= 0 else int(random.random()*1000)
+print('seed:', seed)
+random.seed(seed)
+torch.manual_seed(seed)
+if args.cuda:
+    torch.cuda.manual_seed(seed)
+
+# setup logger
+log = logging.getLogger(__name__)
+log.setLevel(logging.DEBUG)
+fh = logging.FileHandler(args.log_file)
+fh.setLevel(logging.DEBUG)
+ch = logging.StreamHandler(sys.stdout)
+ch.setLevel(logging.INFO)
+formatter = logging.Formatter(fmt='%(asctime)s %(message)s', datefmt='%m/%d/%Y %I:%M:%S')
+fh.setFormatter(formatter)
+ch.setFormatter(formatter)
+log.addHandler(fh)
+log.addHandler(ch)
+
+
+def main():
+    log.info('[program starts.]')
+    train, dev, dev_y, embedding, opt = load_data(vars(args))
+    log.info('[Data loaded.]')
+
+    if args.resume:
+        log.info('[loading previous model...]')
+        checkpoint = torch.load(os.path.join(model_dir, args.resume))
+        if args.resume_options:
+            opt = checkpoint['config']
+        state_dict = checkpoint['state_dict']
+        model = DocReaderModel(opt, embedding)
+        print('without weights', hash(model))
+        model = DocReaderModel(opt, embedding, state_dict)
+        print('with weights', hash(model))
+        epoch_0 = checkpoint['epoch'] + 1
+        for i in range(checkpoint['epoch']):
+            random.shuffle(list(range(len(train))))  # synchronize random seed
+        if args.reduce_lr:
+            lr_decay(model.optimizer, lr_decay=args.reduce_lr)
+    else:
+        model = DocReaderModel(opt, embedding)
+        epoch_0 = 1
+
+    if args.cuda:
+        model.cuda()
+
+    if args.resume:
+        batches = BatchGen(dev, batch_size=1, evaluation=True, gpu=args.cuda)
         predictions = []
         for batch in batches:
             predictions.extend(model.predict(batch))
-        return {'result': predictions[0]}
+        em, f1 = score(predictions, dev_y)
+        log.info("[dev EM: {} F1: {}]".format(em, f1))
+        best_val_score = f1
+    else:
+        best_val_score = 0.0
 
-    app.run(debug=True, port=6006, host='0.0.0.0', reloader=False)
+    if args.demo:
+        rundemo(model)
+    else:
+        for epoch in range(epoch_0, epoch_0 + args.epochs):
+            log.warn('Epoch {}'.format(epoch))
+            # train
+            batches = BatchGen(train, batch_size=args.batch_size, gpu=args.cuda)
+            start = datetime.now()
+            for i, batch in enumerate(batches):
+                model.update(batch)
+                if i % args.log_per_updates == 0:
+                    log.info('updates[{0:6}] train loss[{1:.5f}] remaining[{2}]'.format(
+                        model.updates, model.train_loss.avg,
+                        str((datetime.now() - start) / (i + 1) * (len(batches) - i - 1)).split('.')[0]))
+            # eval
+            if epoch % args.eval_per_epoch == 0:
+                batches = BatchGen(dev, batch_size=1, evaluation=True, gpu=args.cuda)
+                predictions = []
+                for batch in batches:
+                    predictions.extend(model.predict(batch))
+                em, f1 = score(predictions, dev_y)
+                log.warn("dev EM: {} F1: {}".format(em, f1))
+            # save
+            if not args.save_last_only or epoch == epoch_0 + args.epochs - 1:
+                fname = 'checkpoint_epoch_{}.pt'.format(epoch)
+                model_file = os.path.join(model_dir, fname)
+                model.save(model_file, epoch)
+                log.info(str(hash(model)))
+                log.info('reloading model from weights')
+                checkpoint = torch.load(os.path.join(model_dir, fname))
+                if args.resume_options:
+                    opt = checkpoint['config']
+                state_dict = checkpoint['state_dict']
+                model = DocReaderModel(opt, embedding, state_dict)
+                log.info(str(hash(model)))
+                batches = BatchGen(dev, batch_size=1, evaluation=True, gpu=args.cuda)
+                predictions = []
+                for batch in batches:
+                    predictions.extend(model.predict(batch))
+                em, f1 = score(predictions, dev_y)
+                log.warn("dev EM: {} F1: {}".format(em, f1))
+                if f1 > best_val_score:
+                    best_val_score = f1
+                    copyfile(
+                        model_file,
+                        os.path.join(model_dir, 'best_model.pt'))
+                    log.info('[new best model saved.]')
+
+
+def lr_decay(optimizer, lr_decay):
+    for param_group in optimizer.param_groups:
+        param_group['lr'] *= lr_decay
+    log.info('[learning rate reduced by {}]'.format(lr_decay))
+    return optimizer
 
 
 def load_data(opt):
     with open('SQuAD/meta.msgpack', 'rb') as f:
         meta = msgpack.load(f, encoding='utf8')
     embedding = torch.Tensor(meta['embedding'])
-    vocab = meta['vocab']
-    print('Releading from cache')
-    with open('preprocess_cache', 'rb') as fl:
-        relevant = pickle.load(fl)
-        vocab, vocab_tag, vocab_ent = relevant
     opt['pretrained_words'] = True
     opt['vocab_size'] = embedding.size(0)
     opt['embedding_dim'] = embedding.size(1)
     if not opt['fix_embeddings']:
-        means = torch.zeros(opt['embedding_dim'])
-        embedding[1] = torch.normal(means=means, std=1.)
+        embedding[1] = torch.normal(means=torch.zeros(opt['embedding_dim']), std=1.)
     with open(args.data_file, 'rb') as f:
         data = msgpack.load(f, encoding='utf8')
     train_orig = pd.read_csv('SQuAD/train.csv')
@@ -168,7 +400,7 @@ def load_data(opt):
     ))
     dev_y = dev_orig['answers'].tolist()[:len(dev)]
     dev_y = [eval(y) for y in dev_y]
-    return train, dev, dev_y, embedding, opt, vocab, vocab_tag, vocab_ent
+    return train, dev, dev_y, embedding, opt
 
 
 class BatchGen:
@@ -188,8 +420,7 @@ class BatchGen:
             random.shuffle(indices)
             data = [data[i] for i in indices]
         # chunk into batches
-        data = [data[i:i + batch_size]
-                for i in range(0, len(data), batch_size)]
+        data = [data[i:i + batch_size] for i in range(0, len(data), batch_size)]
         self.data = data
 
     def __len__(self):
@@ -210,9 +441,7 @@ class BatchGen:
                 context_id[i, :len(doc)] = torch.LongTensor(doc)
 
             feature_len = len(batch[1][0][0])
-            context_feature = torch.Tensor(batch_size,
-                                           context_len,
-                                           feature_len).fill_(0)
+            context_feature = torch.Tensor(batch_size, context_len, feature_len).fill_(0)
             for i, doc in enumerate(batch[1]):
                 for j, feature in enumerate(doc):
                     context_feature[i, j, :] = torch.Tensor(feature)
@@ -245,15 +474,11 @@ class BatchGen:
                 question_id = question_id.pin_memory()
                 question_mask = question_mask.pin_memory()
             if self.eval:
-                yield (context_id, context_feature,
-                       context_tag, context_ent,
-                       context_mask, question_id,
-                       question_mask, text, span)
+                yield (context_id, context_feature, context_tag, context_ent, context_mask,
+                       question_id, question_mask, text, span)
             else:
-                yield (context_id, context_feature,
-                       context_tag, context_ent,
-                       context_mask, question_id,
-                       question_mask, y_s, y_e, text, span)
+                yield (context_id, context_feature, context_tag, context_ent, context_mask,
+                       question_id, question_mask, y_s, y_e, text, span)
 
 
 def _normalize_answer(s):
@@ -311,86 +536,6 @@ def score(pred, truth):
     em = 100. * em / total
     f1 = 100. * f1 / total
     return em, f1
-
-
-def pre_proc(text):
-    '''normalize spaces in a string.'''
-    text = re.sub('\s+', ' ', text)
-    return text
-
-
-def token2id(docs, vocab, unk_id=None):
-    w2id = {w: i for i, w in enumerate(vocab)}
-    ids = [[w2id[w] if w in w2id else unk_id for w in doc] for doc in docs]
-    return ids
-
-
-def normalize_text(text):
-    return unicodedata.normalize('NFD', text)
-
-
-def live_preprocess(context, question, vocab, vocab_tag, vocab_ent, nlp):
-    "Produce live dictionary for running the code"
-    questions = [question]
-    contexts = [context]
-
-    context_text = [pre_proc(c) for c in contexts]
-    question_text = [pre_proc(q) for q in questions]
-
-    question_docs = [nlp(doc) for doc in question_text]
-    context_docs = [nlp(doc) for doc in context_text]
-    question_tokens = [[normalize_text(w.text) for w in doc]
-                       for doc in question_docs]
-    context_tokens = [[normalize_text(w.text) for w in doc]
-                      for doc in context_docs]
-    context_token_span = [[(w.idx, w.idx + len(w.text)) for w in doc]
-                          for doc in context_docs]
-    context_tags = [[w.tag_ for w in doc] for doc in context_docs]
-    context_ents = [[w.ent_type_ for w in doc] for doc in context_docs]
-    context_features = []
-    for question, context in zip(question_docs, context_docs):
-        question_word = {w.text for w in question}
-        question_lower = {w.text.lower() for w in question}
-        question_lemma = {w.lemma_ if w.lemma_ != '-PRON-' else w.text.lower()
-                          for w in question}
-        match_origin = [w.text in question_word for w in context]
-        match_lower = [w.text.lower() in question_lower for w in context]
-        match_lemma = [((w.lemma_ if w.lemma_ != '-PRON-' else w.text.lower())
-                        in question_lemma) for w in context]
-        context_features.append(list(zip(match_origin, match_lower,
-                                         match_lemma)))
-        context_tf = []
-        for doc in context_tokens:
-            counter_ = Counter(w.lower() for w in doc)
-            total = sum(counter_.values())
-            context_tf.append([counter_[w.lower()] / total for w in doc])
-        context_features = [[list(w) + [tf]
-                            for w, tf in zip(doc, tfs)]
-                            for doc, tfs in zip(context_features, context_tf)]
-
-    question_ids = token2id(question_tokens, vocab, unk_id=1)
-    context_ids = token2id(context_tokens, vocab, unk_id=1)
-    context_tag_ids = token2id(context_tags, vocab_tag)
-    context_ent_ids = token2id(context_ents, vocab_ent)
-    data = {
-            'dev_question_ids': question_ids,
-            'dev_context_ids': context_ids,
-            'dev_context_features': context_features,
-            'dev_context_tags': context_tag_ids,
-            'dev_context_ents': context_ent_ids,
-            'dev_context_text': context_text,
-            'dev_context_spans': context_token_span
-            }
-    dev = list(zip(
-        data['dev_context_ids'],
-        data['dev_context_features'],
-        data['dev_context_tags'],
-        data['dev_context_ents'],
-        data['dev_question_ids'],
-        data['dev_context_text'],
-        data['dev_context_spans']
-    ))
-    return dev
 
 
 if __name__ == '__main__':
