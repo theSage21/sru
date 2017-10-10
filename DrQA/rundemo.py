@@ -169,7 +169,7 @@ parser = argparse.ArgumentParser(
     description='Train a Document Reader model.'
 )
 # DEMO
-parser.add_argument('--rundemo', action='store_true',
+parser.add_argument('--demo', action='store_true',
                     help='run the demo as a bottle app')
 # system
 parser.add_argument('--log_file', default='output.log',
