@@ -176,15 +176,29 @@ def main():
             log.warn("dev EM: {} F1: {}".format(em, f1))
         # save
         if not args.save_last_only or epoch == epoch_0 + args.epochs - 1:
-            model_file = os.path.join(model_dir, 'checkpoint_epoch_{}.pt'.format(epoch))
+            fname = 'checkpoint_epoch_{}.pt'.format(epoch)
+            model_file = os.path.join(model_dir, fname)
             model.save(model_file, epoch)
+            log.info(str(hash(model)))
+            log.info('reloading model from weights')
+            checkpoint = torch.load(os.path.join(model_dir, fname))
+            if args.resume_options:
+                opt = checkpoint['config']
+            state_dict = checkpoint['state_dict']
+            model = DocReaderModel(opt, embedding)
+            log.info(str(hash(model)))
+            batches = BatchGen(dev, batch_size=1, evaluation=True, gpu=args.cuda)
+            predictions = []
+            for batch in batches:
+                predictions.extend(model.predict(batch))
+            em, f1 = score(predictions, dev_y)
+            log.warn("dev EM: {} F1: {}".format(em, f1))
             if f1 > best_val_score:
                 best_val_score = f1
                 copyfile(
                     model_file,
                     os.path.join(model_dir, 'best_model.pt'))
                 log.info('[new best model saved.]')
-                log.info(str(hash(model)))
 
 
 def lr_decay(optimizer, lr_decay):
