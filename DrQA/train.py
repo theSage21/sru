@@ -128,7 +128,10 @@ def main():
         if args.resume_options:
             opt = checkpoint['config']
         state_dict = checkpoint['state_dict']
+        model = DocReaderModel(opt, embedding)
+        print('without weights', hash(model))
         model = DocReaderModel(opt, embedding, state_dict)
+        print('with weights', hash(model))
         epoch_0 = checkpoint['epoch'] + 1
         for i in range(checkpoint['epoch']):
             random.shuffle(list(range(len(train))))  # synchronize random seed
